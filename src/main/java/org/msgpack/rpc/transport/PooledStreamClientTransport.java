@@ -15,165 +15,183 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.transport;
 
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.List;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
-import org.jboss.netty.logging.InternalLogger;
-import org.jboss.netty.logging.InternalLoggerFactory;
+import java.io.OutputStream;
+import java.util.List;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.msgpack.MessagePack;
 import org.msgpack.rpc.Session;
 import org.msgpack.rpc.config.StreamClientConfig;
-import org.msgpack.MessagePack;
 
 public abstract class PooledStreamClientTransport<Channel, PendingBuffer extends OutputStream> implements ClientTransport {
-    private static final InternalLogger LOG =
-        InternalLoggerFactory.getInstance(PooledStreamClientTransport.class);
+	private static final InternalLogger LOG = InternalLoggerFactory.getInstance(PooledStreamClientTransport.class);
+	private static final int MAX_CHANNEL = 2;
 
-    private final Object lock = new Object();
-    private final List<Channel> pool = new ArrayList<Channel>();
-    private final List<Channel> errorChannelPool = new ArrayList<Channel>();
-    private int reconnectionLimit;
-    private int connecting = 0;
+	private final List<Channel> pool = new CopyOnWriteArrayList<>();
+	private final List<Channel> errorChannelPool = new CopyOnWriteArrayList<>();
+	private final AtomicInteger connecting = new AtomicInteger();
+	private final Queue<Object> queMessage = new ConcurrentLinkedQueue<>();
+	private final AtomicInteger assignIndex = new AtomicInteger();
+	protected final Session session;
+	protected final StreamClientConfig config;
+	protected final MessagePack messagePack;
+	protected final int maxChannel = Objects.isNull(System.getProperty("maxChannel")) ? MAX_CHANNEL : Integer.valueOf(System.getProperty("maxChannel"));
+	protected final boolean isSocks =   (Objects.nonNull(System.getProperty("socksProxyHost")) && Objects.nonNull(System.getProperty("socksProxyPort")));
 
-    protected final Session session;
-    protected final StreamClientConfig config;
-    protected final MessagePack messagePack;
+	public PooledStreamClientTransport(StreamClientConfig config, Session session) {
+		this.session = session;
+		this.config = config;
+		this.messagePack = session.getEventLoop().getMessagePack();
+	}
 
-    public PooledStreamClientTransport(StreamClientConfig config,
-            Session session) {
-        this.session = session;
-        this.config = config;
-        this.reconnectionLimit = config.getReconnectionLimit();
-        this.messagePack = session.getEventLoop().getMessagePack();
-    }
+	protected Session getSession() {
+		return session;
+	}
 
-    protected Session getSession() {
-        return session;
-    }
+	protected StreamClientConfig getConfig() {
+		return config;
+	}
 
-    protected StreamClientConfig getConfig() {
-        return config;
-    }
+	public synchronized void sendMessage(Object msg) {
+		if (connecting.get() == -1) {
+			return;
+		} // already closed
 
-    public void sendMessage(Object msg) {
-        synchronized (lock) {
-            if (connecting == -1) {
-                return;
-            } // already closed
-            if (pool.isEmpty()) {
-                if (connecting == 0) {
-                    connecting++;
-                    startConnection();
-                }
-                if (pool.isEmpty()) { // may be already connected
-                    try {
-                        messagePack.write(getPendingBuffer(), msg);
-                    } catch (IOException e) {
-                        // FIXME
-                    }
-                    return;
-                }
-            }
-            // FIXME pseudo connection load balancing
-            Channel c = pool.get(0);
-            sendMessageChannel(c, msg);
-        }
-    }
+			if (connecting.get() <= 0) {
+				if (connecting.get() < maxChannel) {
+					connecting.incrementAndGet();
+					startConnection();
+					queMessage.offer(msg);
+				} else {
+					queMessage.offer(msg);
+				}
+			} else {
+				if (connecting.get() >= maxChannel) {
+					if (!pool.isEmpty()) {
+						int index = assignIndex.getAndIncrement() % pool.size();
+						if (index >= Integer.MAX_VALUE) {
+							assignIndex.set(0);
+						}
+						Channel c = pool.get(index);
+						sendMessageChannel(c, msg);
+						flushMessageQue(c);
+					} else {
+						queMessage.offer(msg);
+					}
+				} else {
+					connecting.incrementAndGet();
+					startConnection();
+					queMessage.offer(msg);
+				}
+			}
+	}
 
-    public void close() {
-        synchronized (lock) {
-            LOG.info("Close all channels");
-            if (pendingBuffer != null) {
-                closePendingBuffer(pendingBuffer);
-                pendingBuffer = null;
-            }
-            connecting = -1;
-            for (Channel c : pool) {
-                closeChannel(c);
-            }
-            for (Channel c : errorChannelPool) {
-                closeChannel(c);
-            }
-            pool.clear();
-            errorChannelPool.clear();
-        }
-    }
+	public void close() {
+		LOG.debug("Close all channels");
+		connecting.set(-1);
+		for (Channel c : pool) {
+			closeChannel(c);
+		}
+		for (Channel c : errorChannelPool) {
+			closeChannel(c);
+		}
+		pool.clear();
+		errorChannelPool.clear();
+		queMessage.clear();
+	}
 
-    public void onConnected(Channel c) {
-        synchronized (lock) {
-            if (connecting == -1) {
-                closeChannel(c);
-                return;
-            } // already closed
-            LOG.debug("Success to connect new channel " + c);
-            pool.add(c);
-            connecting = 0;
-            if (pendingBuffer != null) {
-                flushPendingBuffer(pendingBuffer, c);
-            }
-        }
-    }
+	public void onConnected(Channel c) {
+		if (connecting.get() == -1) {
+			closeChannel(c);
+			return;
+		} // already closed
 
-    public void onConnectFailed(Channel c, Throwable cause) {
-        synchronized (lock) {
-            if (connecting == -1) {
-                return;
-            } // already closed
-            if (connecting < reconnectionLimit) {
-                LOG.info(String.format("Reconnect %s(retry:%s)", c,
-                        connecting + 1), cause);
-                connecting++;
-                if (pool.remove(c)) {// remove error channel
-                    errorChannelPool.add(c);
-                }
-                startConnection();
-            } else {
-                LOG.error(String.format(
-                        "Fail to connect %s(tried %s times)", c,
-                        reconnectionLimit), cause);
-                connecting = 0;
-                if (pendingBuffer != null) {
-                    resetPendingBuffer(pendingBuffer);
-                }
-                session.transportConnectFailed();
-            }
-        }
-    }
+		LOG.debug("Success to connect new channel " + c);
+		LOG.debug(Objects.toString(c));
+		pool.add(c);
+		flushMessageQue(c);
+	}
 
-    public void onClosed(Channel c) {
-        synchronized (lock) {
-            if (connecting == -1) {
-                return;
-            } // already closed
-            LOG.info(String.format("Close channel %s", c));
-            pool.remove(c);
-            errorChannelPool.remove(c);
-        }
-    }
+	public void onConnectFailed(Channel c, Throwable cause) {
+		if (connecting.get() == -1) {
+			return;
+		} // already closed
+		LOG.error(String.format("Fail to connect %s", c), cause);
+		connecting.set(pool.size());
+		session.transportConnectFailed();
+		closeChannel(c);
+	}
 
-    private PendingBuffer pendingBuffer = null;
+	public void onClosed(Channel c) {
+		if (connecting.get() == -1) {
+			return;
+		} // already closed
+		LOG.debug(String.format("Close channel %s", c));
+		pool.remove(c);
+		errorChannelPool.remove(c);
+		connecting.set(pool.size());
+	}
 
-    protected PendingBuffer getPendingBuffer() {
-        if (pendingBuffer == null) {
-            pendingBuffer = newPendingBuffer();
-        }
-        return pendingBuffer;
-    }
+	@Override
+	public void sendDataDelay(Object obj) {
 
-    protected abstract PendingBuffer newPendingBuffer();
+	}
 
-    protected abstract void resetPendingBuffer(PendingBuffer b);
+	public void onError(Channel c, String msg) {
+		if (connecting.get() == -1) {
+			return;
+		} // already closed
+		LOG.info(String.format("Error channel %s", c));
+		closeChannel(c);
+		session.transportError(msg);
 
-    protected abstract void flushPendingBuffer(PendingBuffer b, Channel c);
+	}
 
-    protected abstract void closePendingBuffer(PendingBuffer b);
+	protected synchronized void flushMessageQue(Channel c) {
+		if (!queMessage.isEmpty()) {
+			queMessage.forEach(m -> sendMessageChannel(c, m));
+			queMessage.clear();
+		}
+	}
 
-    protected abstract void startConnection();
+	protected abstract PendingBuffer newPendingBuffer();
 
-    protected abstract void sendMessageChannel(Channel c, Object msg);
+	protected abstract void resetPendingBuffer(PendingBuffer b);
 
-    protected abstract void closeChannel(Channel c);
+	protected abstract void flushPendingBuffer(PendingBuffer b, Channel c);
+
+	protected abstract void closePendingBuffer(PendingBuffer b);
+
+	protected abstract void sendMessageChannel(Channel c, Object msg);
+
+	protected abstract void closeChannel(Channel c);
+
+	protected abstract void startConnection();
+
 }

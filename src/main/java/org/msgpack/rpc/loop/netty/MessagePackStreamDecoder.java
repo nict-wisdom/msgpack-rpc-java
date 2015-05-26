@@ -15,53 +15,63 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
-import java.io.ByteArrayInputStream;
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.codec.ByteToMessageDecoder;
+
 import java.io.EOFException;
 import java.nio.ByteBuffer;
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.handler.codec.frame.FrameDecoder;
+import java.util.List;
+
 import org.msgpack.MessagePack;
 import org.msgpack.type.Value;
 import org.msgpack.unpacker.Unpacker;
 
-public class MessagePackStreamDecoder extends FrameDecoder {
-    protected MessagePack msgpack;
+public class MessagePackStreamDecoder extends ByteToMessageDecoder {
+	protected MessagePack msgpack;
 
-    public MessagePackStreamDecoder(MessagePack msgpack) {
-        super();
-        this.msgpack = msgpack;
-    }
+	public MessagePackStreamDecoder(MessagePack msgpack) {
+		super();
+		this.msgpack = msgpack;
+	}
 
-    @Override
-    protected Object decode(ChannelHandlerContext ctx, Channel channel,
-            ChannelBuffer source) throws Exception {
-        // TODO #MN will modify the body with MessagePackBufferUnpacker.
-        ByteBuffer buffer = source.toByteBuffer();
-        if (!buffer.hasRemaining()) {
-            return null;
-        }
-        source.markReaderIndex();
+	@Override
+	protected void decode(ChannelHandlerContext ctx, ByteBuf msg, List<Object> paramList) throws Exception {
 
-        byte[] bytes = buffer.array(); // FIXME buffer must has array
-        int offset = buffer.arrayOffset() + buffer.position();
-        int length = buffer.arrayOffset() + buffer.limit();
-        ByteArrayInputStream stream = new ByteArrayInputStream(bytes, offset,
-                length);
-        int startAvailable = stream.available();
-        try{
-            Unpacker unpacker = msgpack.createUnpacker(stream);
-            Value v = unpacker.readValue();
-            source.skipBytes(startAvailable - stream.available());
-            return v;
-        }catch( EOFException e ){
-            // not enough buffers.
-            // So retry reading
-            source.resetReaderIndex();
-            return null;
-        }
-    }
+		if (msg.isReadable()) {
+			ByteBuffer buffer = msg.nioBuffer();
+			Unpacker unpacker = msgpack.createBufferUnpacker(buffer);
+			int lastPos = 0;
+			try {
+				while (buffer.position() < buffer.limit()) {
+					Value v = unpacker.readValue();
+					paramList.add(v);
+					lastPos = buffer.position();
+				}
+				msg.skipBytes(lastPos);
+			} catch (EOFException e) {
+				msg.skipBytes(lastPos);
+			}
+		}
+	}
+
 }

@@ -15,17 +15,36 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.handler.codec.ByteToMessageDecoder;
+
 import java.nio.ByteBuffer;
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.handler.codec.oneone.OneToOneDecoder;
+import java.util.List;
+
 import org.msgpack.MessagePack;
 import org.msgpack.type.Value;
 
-public class MessagePackDecoder extends OneToOneDecoder {
+public class MessagePackDecoder extends ByteToMessageDecoder {
 
     MessagePack messagePack;
 
@@ -34,18 +53,15 @@ public class MessagePackDecoder extends OneToOneDecoder {
         this.messagePack = messagePack;
     }
 
-    @Override
-    protected Object decode(ChannelHandlerContext ctx, Channel channel,
-            Object msg) throws Exception {
-        if (!(msg instanceof ChannelBuffer)) {
-            return msg;
-        }
 
-        ChannelBuffer source = (ChannelBuffer) msg;
+	@Override
+	protected void decode(ChannelHandlerContext ctx, ByteBuf msg, List<Object> result) throws Exception {
+		// TODO 自動生成されたメソッド・スタブ
 
-        ByteBuffer buffer = source.toByteBuffer();
+
+        ByteBuffer buffer = msg.nioBuffer();
         if (!buffer.hasRemaining()) {
-            return null;
+            return;
         }
 
         byte[] bytes = buffer.array(); // FIXME buffer must has array
@@ -53,12 +69,6 @@ public class MessagePackDecoder extends OneToOneDecoder {
         int length = buffer.arrayOffset() + buffer.limit();
 
         Value v = messagePack.read(bytes, offset, length);
-        return v;
-
-        // TODO MessagePack.unpack()
-        /*
-         * Unpacker pac = new Unpacker(); pac.wrap(bytes, offset, length);
-         * return pac.unpackObject();
-         */
-    }
+        result.add(v);
+	}
 }

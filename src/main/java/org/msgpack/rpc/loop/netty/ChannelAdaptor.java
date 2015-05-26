@@ -15,24 +15,57 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.Channels;
+import io.netty.channel.ChannelHandlerContext;
+
+import java.util.concurrent.atomic.AtomicLong;
+
 import org.msgpack.rpc.transport.ClientTransport;
 
 class ChannelAdaptor implements ClientTransport {
-    private Channel channel;
+	private static final int FLUSH_SPAN_MS = 100; //FLUSH_SPAN_MS 以下の物は、Streamingでも一気に返す。
+	private ChannelHandlerContext ctx;
+	private AtomicLong timeLastFlush = new AtomicLong(System.currentTimeMillis() + FLUSH_SPAN_MS);
 
-    ChannelAdaptor(Channel channel) {
-        this.channel = channel;
-    }
+	ChannelAdaptor(ChannelHandlerContext ctx) {
+		this.ctx = ctx;
+	}
 
-    public void sendMessage(Object msg) {
-        Channels.write(channel, msg);
-    }
+	@Override
+	public void sendMessage(Object msg) {
+		ctx.writeAndFlush(msg);
+	}
 
-    public void close() {
-        channel.close();
-    }
+	@Override
+	public void close() {
+		ctx.flush();
+		ctx.close();
+	}
+
+	@Override
+	public void sendDataDelay(Object obj) {
+		ctx.write(obj);
+		if(timeLastFlush.get() < System.currentTimeMillis()){
+			ctx.flush();
+			timeLastFlush.set((System.currentTimeMillis() + FLUSH_SPAN_MS));
+		}
+	}
 }

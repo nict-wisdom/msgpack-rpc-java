@@ -15,103 +15,181 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
-import java.util.Map;
+import io.netty.bootstrap.Bootstrap;
+import io.netty.buffer.ByteBufOutputStream;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.codec.socks.SocksInitResponseDecoder;
+import io.netty.handler.codec.socks.SocksMessageEncoder;
+import io.netty.util.internal.logging.InternalLogger;
+import io.netty.util.internal.logging.InternalLoggerFactory;
 
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.Channels;
-import org.jboss.netty.channel.ChannelFuture;
-import org.jboss.netty.channel.ChannelFutureListener;
-import org.jboss.netty.buffer.ChannelBuffers;
-import org.jboss.netty.buffer.ChannelBufferOutputStream;
-import org.jboss.netty.buffer.HeapChannelBufferFactory;
-import org.jboss.netty.bootstrap.ClientBootstrap;
+import java.net.SocketAddress;
+import java.net.UnknownHostException;
+
 import org.msgpack.rpc.Session;
+import org.msgpack.rpc.address.IPAddress;
 import org.msgpack.rpc.config.TcpClientConfig;
-import org.msgpack.rpc.transport.RpcMessageHandler;
+import org.msgpack.rpc.extension.socks.SocksProxyHandler;
 import org.msgpack.rpc.transport.PooledStreamClientTransport;
+import org.msgpack.rpc.transport.RpcMessageHandler;
 
-class NettyTcpClientTransport extends PooledStreamClientTransport<Channel, ChannelBufferOutputStream> {
-    private static final String TCP_NO_DELAY = "tcpNoDelay";
+public class NettyTcpClientTransport extends PooledStreamClientTransport<Channel, ByteBufOutputStream> {
+	private static final InternalLogger LOG = InternalLoggerFactory.getInstance(NettyTcpClientTransport.class);
+	private final Bootstrap bootstrap;
+	private final EventLoopGroup group = new NioEventLoopGroup(maxChannel);
+	private RpcMessageHandler handler = null;
+	private NettyEventLoop eventLoop = null;
 
-    private final ClientBootstrap bootstrap;
+	NettyTcpClientTransport(TcpClientConfig config, Session session, NettyEventLoop loop, Class<? extends RpcMessageHandler> rpcHandlerClass) {
+		super(config, session);
 
-    NettyTcpClientTransport(TcpClientConfig config, Session session,
-            NettyEventLoop loop) {
-        // TODO check session.getAddress() instanceof IPAddress
-        super(config, session);
+		try {
+			handler = rpcHandlerClass.getConstructor(Session.class).newInstance(session);
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
 
-        RpcMessageHandler handler = new RpcMessageHandler(session);
+		//		handler = new RpcMessageHandlerEx(session);
+		eventLoop = loop;
+		bootstrap = new Bootstrap().group(group);
+		bootstrap.channel(NioSocketChannel.class);
+		final NettyTcpClientTransport trans = this;
+		bootstrap.handler(new ChannelInitializer<SocketChannel>() {
 
-        bootstrap = new ClientBootstrap(loop.getClientFactory());
-        bootstrap.setPipelineFactory(new StreamPipelineFactory(loop.getMessagePack(), handler));
-        Map<String, Object> options = config.getOptions();
-        setIfNotPresent(options, TCP_NO_DELAY, Boolean.TRUE, bootstrap);
-        bootstrap.setOptions(options);
-    }
+			@Override
+			protected void initChannel(SocketChannel ch) throws Exception {
+				ChannelPipeline p = ch.pipeline();
+				if (isSocks) {
+					p.addFirst("socks-handler", new SocksProxyHandler(session, trans));
+					p.addFirst("socks-encode", new SocksMessageEncoder());
+					p.addFirst("socks-decode", new SocksInitResponseDecoder());
+				}
+				p.addLast("msgpack-decode-stream", new MessagePackStreamDecoder(eventLoop.getMessagePack()));
+				p.addLast("msgpack-encode", new MessagePackEncoder(eventLoop.getMessagePack()));
+				p.addLast("message", new MessageHandler(handler, trans));
+			}
 
-    private final ChannelFutureListener connectListener = new ChannelFutureListener() {
-        public void operationComplete(ChannelFuture future) throws Exception {
-            if (!future.isSuccess()) {
-                onConnectFailed(future.getChannel(), future.getCause());
-                return;
-            }
-            Channel c = future.getChannel();
-            c.getCloseFuture().addListener(closeListener);
-            onConnected(c);
-        }
-    };
+		});
+		bootstrap.option(ChannelOption.TCP_NODELAY, true);
+	}
 
-    private final ChannelFutureListener closeListener = new ChannelFutureListener() {
-        public void operationComplete(ChannelFuture future) throws Exception {
-            Channel c = future.getChannel();
-            onClosed(c);
-        }
-    };
+	@Override
+	protected ByteBufOutputStream newPendingBuffer() {
+		return new ByteBufOutputStream(Unpooled.buffer());
+	}
 
-    @Override
-    protected void startConnection() {
-        ChannelFuture f = bootstrap.connect(session.getAddress().getSocketAddress());
-        f.addListener(connectListener);
-    }
+	@Override
+	protected void sendMessageChannel(Channel c, Object msg) {
+		c.writeAndFlush(msg);
+	}
 
-    @Override
-    protected ChannelBufferOutputStream newPendingBuffer() {
-        return new ChannelBufferOutputStream(
-                ChannelBuffers.dynamicBuffer(HeapChannelBufferFactory.getInstance()));
-    }
+	@Override
+	protected void closeChannel(Channel c) {
+		c.close();
+	}
 
-    @Override
-    protected void resetPendingBuffer(ChannelBufferOutputStream b) {
-        b.buffer().clear();
-    }
+	@Override
+	protected void resetPendingBuffer(ByteBufOutputStream b) {
+		b.buffer().clear();
 
-    @Override
-    protected void flushPendingBuffer(ChannelBufferOutputStream b, Channel c) {
-        Channels.write(c, b.buffer());
-        b.buffer().clear();
-    }
+	}
 
-    @Override
-    protected void closePendingBuffer(ChannelBufferOutputStream b) {
-        b.buffer().clear();
-    }
+	@Override
+	protected void flushPendingBuffer(ByteBufOutputStream b, Channel c) {
+		c.writeAndFlush(b.buffer());
+		b.buffer().clear();
 
-    @Override
-    protected void sendMessageChannel(Channel c, Object msg) {
-        Channels.write(c, msg);
-    }
+	}
 
-    @Override
-    protected void closeChannel(Channel c) {
-        c.close();
-    }
+	@Override
+	protected void closePendingBuffer(ByteBufOutputStream b) {
+		b.buffer().clear();
 
-    private static void setIfNotPresent(Map<String, Object> options,
-            String key, Object value, ClientBootstrap bootstrap) {
-        if (!options.containsKey(key)) {
-            bootstrap.setOption(key, value);
-        }
-    }
+	}
+
+	@Override
+	public void close() {
+		super.close();
+		group.shutdownGracefully();
+	}
+
+	@Override
+	protected void startConnection() {
+
+		try {
+			SocketAddress addr = (isSocks) ?
+					new IPAddress(System.getProperty("socksProxyHost", "localhost"), Integer.valueOf(System.getProperty("socksProxyPort", "0"))).getSocketAddress() :
+					session.getAddress().getSocketAddress();
+
+			ChannelFuture f = bootstrap.connect(addr);
+
+			f.addListener((ChannelFutureListener) future -> {
+
+				if (!future.isSuccess()) {
+					onConnectFailed(future.channel(), future.cause());
+					return;
+				}
+
+				Channel c = f.channel();
+
+				c.closeFuture().addListener((ChannelFutureListener) closeFt -> {
+					Channel ch = closeFt.channel();
+					onClosed(ch);
+				});
+
+				//				MessageChannel mc = (MessageChannel) f.channel();
+
+				if (isSocks) {
+					//					mc.setUseSocksProxy(isSocks);
+					LOG.debug("--- useSocksProxy ----");
+					LOG.debug(System.getProperty("socksProxyHost"));
+					LOG.debug(System.getProperty("socksProxyPort"));
+
+				}
+			});
+
+		} catch (NumberFormatException e) {
+			// TODO 自動生成された catch ブロック
+			e.printStackTrace();
+		} catch (UnknownHostException e) {
+			// TODO 自動生成された catch ブロック
+			e.printStackTrace();
+		}
+	}
+
+	public void onSocksConnected(Channel c) {
+		ChannelPipeline p = c.pipeline();
+		p.fireChannelActive();
+	}
+
 }

@@ -15,18 +15,29 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.reflect;
 
-import org.msgpack.*;
-import org.msgpack.annotation.*;
-import org.msgpack.rpc.*;
-import org.msgpack.rpc.dispatcher.*;
-import org.msgpack.rpc.config.*;
-import org.msgpack.rpc.loop.*;
-import org.msgpack.rpc.loop.netty.*;
-import java.util.*;
-import junit.framework.*;
 import org.junit.Test;
+import org.msgpack.annotation.Ignore;
+import org.msgpack.annotation.Index;
+import org.msgpack.annotation.Optional;
 
 public class AnnotationTest extends ReflectTest {
 	public static interface IgnoreTest {
@@ -101,7 +112,7 @@ public class AnnotationTest extends ReflectTest {
 		OmitTest c = context.getClient().proxy(OmitTest.class);
 		try {
 			String result;
-			
+
 			result = c.m01("a0");
 			assertEquals(""+"a0"+null, result);
 
@@ -119,7 +130,7 @@ public class AnnotationTest extends ReflectTest {
         OmitTest c = context.getClient().proxy(OmitTest.class);
         try {
             String result;
-            
+
             result = c.m01("a0");
             assertEquals(""+"a0"+null, result);
 

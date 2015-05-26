@@ -15,27 +15,41 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 
+import org.msgpack.rpc.address.IPAddress;
 import org.msgpack.rpc.builder.DefaultDispatcherBuilder;
 import org.msgpack.rpc.builder.DispatcherBuilder;
-import org.msgpack.rpc.reflect.Reflect;
-import org.msgpack.type.NilValue;
-import org.msgpack.type.Value;
-import org.msgpack.rpc.address.IPAddress;
-import org.msgpack.rpc.dispatcher.Dispatcher;
-import org.msgpack.rpc.dispatcher.MethodDispatcher;
 import org.msgpack.rpc.config.ClientConfig;
 import org.msgpack.rpc.config.ServerConfig;
 import org.msgpack.rpc.config.TcpServerConfig;
-import org.msgpack.rpc.transport.ServerTransport;
-import org.msgpack.rpc.transport.MessageSendable;
-import org.msgpack.rpc.loop.EventLoop;
+import org.msgpack.rpc.dispatcher.Dispatcher;
 import org.msgpack.rpc.error.RPCError;
+import org.msgpack.rpc.loop.EventLoop;
+import org.msgpack.rpc.transport.MessageSendable;
+import org.msgpack.rpc.transport.ServerTransport;
+import org.msgpack.type.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,7 +57,7 @@ public class Server extends SessionPool {
 
     private final static Logger logger = LoggerFactory.getLogger(Server.class);
 
-    private Dispatcher dp;
+    protected Dispatcher dp;
     private ServerTransport stran;
     private DispatcherBuilder dispatcherBuilder = new DefaultDispatcherBuilder();
 

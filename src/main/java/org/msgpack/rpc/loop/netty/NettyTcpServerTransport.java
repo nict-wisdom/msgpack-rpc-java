@@ -15,49 +15,86 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
-import java.util.Map;
+import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
+import io.netty.channel.nio.NioEventLoopGroup;
+import io.netty.channel.socket.SocketChannel;
+import io.netty.channel.socket.nio.NioServerSocketChannel;
 
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.msgpack.rpc.Server;
+import org.msgpack.rpc.address.Address;
 import org.msgpack.rpc.config.TcpServerConfig;
 import org.msgpack.rpc.transport.RpcMessageHandler;
 import org.msgpack.rpc.transport.ServerTransport;
-import org.msgpack.rpc.address.Address;
 
 class NettyTcpServerTransport implements ServerTransport {
-    private Channel listenChannel;
-    private final static String CHILD_TCP_NODELAY = "child.tcpNoDelay";
-    private final static String REUSE_ADDRESS = "reuseAddress";
+	private ChannelFuture future = null;
+	private final EventLoopGroup bossGroup = new NioEventLoopGroup(2);
+	private final EventLoopGroup workerGroup = new NioEventLoopGroup(8);
 
-    NettyTcpServerTransport(TcpServerConfig config, Server server, NettyEventLoop loop) {
-        if (server == null) {
-            throw new IllegalArgumentException("Server must not be null");
-        }
+	NettyTcpServerTransport(TcpServerConfig config, Server server, NettyEventLoop loop, Class<? extends RpcMessageHandler> rpcHandlerClass) {
+		if (server == null) {
+			throw new IllegalArgumentException("Server must not be null");
+		}
 
-        Address address = config.getListenAddress();
-        RpcMessageHandler handler = new RpcMessageHandler(server);
-        handler.useThread(true);
+		Address address = config.getListenAddress();
 
-        ServerBootstrap bootstrap = new ServerBootstrap(loop.getServerFactory());
-        bootstrap.setPipelineFactory(new StreamPipelineFactory(loop.getMessagePack(), handler));
-        final Map<String, Object> options = config.getOptions();
-        setIfNotPresent(options, CHILD_TCP_NODELAY, Boolean.TRUE, bootstrap);
-        setIfNotPresent(options, REUSE_ADDRESS, Boolean.TRUE, bootstrap);
-        bootstrap.setOptions(options);
-        this.listenChannel = bootstrap.bind(address.getSocketAddress());
-    }
+		try {
+			RpcMessageHandler handler = rpcHandlerClass.getConstructor(Server.class).newInstance(server);
+			handler.useThread(true);
 
-    public void close() {
-        listenChannel.close();
-    }
+			ServerBootstrap bootstrap = new ServerBootstrap().group(bossGroup, workerGroup).channel(NioServerSocketChannel.class);
 
-    private static void setIfNotPresent(Map<String, Object> options,
-            String key, Object value, ServerBootstrap bootstrap) {
-        if (!options.containsKey(key)) {
-            bootstrap.setOption(key, value);
-        }
-    }
+			bootstrap.childHandler(new ChannelInitializer<SocketChannel>() {
+
+				@Override
+				protected void initChannel(SocketChannel ch) throws Exception {
+					ChannelPipeline p = ch.pipeline();
+					p.addLast("msgpack-decode-stream", new MessagePackStreamDecoder(loop.getMessagePack()));
+					p.addLast("msgpack-encode", new MessagePackEncoder(loop.getMessagePack()));
+					p.addLast("message", new MessageHandler(handler));
+				}
+
+			});
+			bootstrap.childOption(ChannelOption.TCP_NODELAY, true);
+			bootstrap.option(ChannelOption.SO_REUSEADDR, true);
+			bootstrap.option(ChannelOption.TCP_NODELAY, true);
+			bootstrap.localAddress(address.getSocketAddress());
+			future = bootstrap.bind();
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+
+		//		RpcMessageHandler handler = new RpcMessageHandlerEx(server);
+
+	}
+
+	public void close() {
+		future.channel().close();
+		workerGroup.shutdownGracefully();
+		bossGroup.shutdownGracefully();
+	}
 }

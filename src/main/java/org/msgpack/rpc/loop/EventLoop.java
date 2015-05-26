@@ -15,24 +15,41 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop;
 
 import java.io.IOException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import org.msgpack.MessagePack;
-import org.msgpack.rpc.Session;
 import org.msgpack.rpc.Server;
-import org.msgpack.rpc.transport.ClientTransport;
-import org.msgpack.rpc.transport.ServerTransport;
+import org.msgpack.rpc.Session;
 import org.msgpack.rpc.config.ClientConfig;
 import org.msgpack.rpc.config.ServerConfig;
 import org.msgpack.rpc.config.TcpClientConfig;
 import org.msgpack.rpc.config.TcpServerConfig;
 import org.msgpack.rpc.loop.netty.NettyEventLoopFactory;
+import org.msgpack.rpc.transport.ClientTransport;
+import org.msgpack.rpc.transport.ServerTransport;
 
 public abstract class EventLoop {
     static private EventLoopFactory loopFactory;
@@ -119,9 +136,9 @@ public abstract class EventLoop {
     }
 
     public void shutdown() {
-        scheduledExecutor.shutdown();
-        ioExecutor.shutdown();
-        workerExecutor.shutdown();
+        scheduledExecutor.shutdownNow();
+        ioExecutor.shutdownNow();
+        workerExecutor.shutdownNow();
     }
 
     public void join() throws InterruptedException {

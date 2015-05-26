@@ -15,39 +15,65 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.channel.ChannelStateEvent;
-import org.jboss.netty.channel.MessageEvent;
-import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+
+import java.util.Objects;
+
 import org.msgpack.rpc.transport.RpcMessageHandler;
 import org.msgpack.type.Value;
 
-class MessageHandler extends SimpleChannelUpstreamHandler {
+class MessageHandler extends SimpleChannelInboundHandler<Value> {
     private RpcMessageHandler handler;
     private ChannelAdaptor adaptor;
+    private NettyTcpClientTransport clientTransport = null;
 
     MessageHandler(RpcMessageHandler handler) {
         this.handler = handler;
     }
 
-    @Override
-    public void channelOpen(ChannelHandlerContext ctx, ChannelStateEvent e)
-            throws Exception {
-        this.adaptor = new ChannelAdaptor(e.getChannel());
-        ctx.sendUpstream(e);
+    public MessageHandler(RpcMessageHandler handler,NettyTcpClientTransport clientTransport) {
+        this.handler = handler;
+        this.clientTransport = clientTransport;
+
     }
 
-    @Override
-    public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) {
-        Object m = e.getMessage();
-        if (!(m instanceof Value)) {
-            ctx.sendUpstream(e);
-            return;
-        }
-
-        Value msg = (Value) m;
+	@Override
+	protected void channelRead0(ChannelHandlerContext ctx, Value msg) throws Exception {
         handler.handleMessage(adaptor, msg);
-    }
+	}
+
+	@Override
+	public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        this.adaptor = new ChannelAdaptor(ctx);
+        clientTransport.onConnected(ctx.channel());
+	}
+
+
+	@Override
+	public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+		if(Objects.nonNull(clientTransport)){
+			clientTransport.onError(ctx.channel(), cause.getMessage());
+		}
+	}
+
 }

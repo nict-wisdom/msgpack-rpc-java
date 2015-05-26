@@ -15,6 +15,23 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
 import java.util.concurrent.ExecutorService;
@@ -25,13 +42,10 @@ import org.msgpack.rpc.loop.EventLoop;
 import org.msgpack.rpc.loop.EventLoopFactory;
 
 public class NettyEventLoopFactory implements EventLoopFactory {
-    public NettyEventLoopFactory() {
-    }
+	public NettyEventLoopFactory() {
+	}
 
-    public EventLoop make(ExecutorService workerExecutor,
-            ExecutorService ioExecutor,
-            ScheduledExecutorService scheduledExecutor, MessagePack messagePack) {
-        return new NettyEventLoop(workerExecutor, ioExecutor,
-                scheduledExecutor, messagePack);
-    }
+	public EventLoop make(ExecutorService workerExecutor, ExecutorService ioExecutor, ScheduledExecutorService scheduledExecutor, MessagePack messagePack) {
+		return new NettyEventLoop(workerExecutor, ioExecutor, scheduledExecutor, messagePack);
+	}
 }

@@ -15,35 +15,53 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc;
 
-import java.util.List;
 import java.util.ArrayList;
-import java.util.Map;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+
 import org.msgpack.rpc.address.Address;
-import org.msgpack.rpc.message.RequestMessage;
-import org.msgpack.rpc.message.NotifyMessage;
-import org.msgpack.rpc.reflect.Reflect;
-import org.msgpack.rpc.transport.ClientTransport;
 import org.msgpack.rpc.config.ClientConfig;
 import org.msgpack.rpc.loop.EventLoop;
+import org.msgpack.rpc.message.NotifyMessage;
+import org.msgpack.rpc.message.RequestMessage;
+import org.msgpack.rpc.reflect.Reflect;
+import org.msgpack.rpc.transport.ClientTransport;
 import org.msgpack.type.Value;
 import org.msgpack.type.ValueFactory;
 
 public class Session {
     protected Address address;
     protected EventLoop loop;
-    private ClientTransport transport;
+    protected ClientTransport transport;
     private Reflect reflect;
 
     private int requestTimeout;
-    private AtomicInteger seqid = new AtomicInteger(0); // FIXME rand()?
-    private Map<Integer, FutureImpl> reqtable = new HashMap<Integer, FutureImpl>();
+    protected AtomicInteger seqid = new AtomicInteger(0); // FIXME rand()?
+    protected Map<Integer, FutureImpl> reqtable = new HashMap<Integer, FutureImpl>();
 
     Session(Address address, ClientConfig config, EventLoop loop) {
         this(address,config,loop,new Reflect(loop.getMessagePack()));
@@ -141,16 +159,14 @@ public class Session {
     }
 
     public void transportConnectFailed() { // FIXME error rseult
-        /*
         synchronized(reqtable) {
             for(Map.Entry<Integer,FutureImpl> pair : reqtable.entrySet()) {
                 // FIXME
                 FutureImpl f = pair.getValue();
-                f.setResult(null,null);
+                f.setResult(null,ValueFactory.createRawValue("Fail to connect"));
             }
             reqtable.clear();
         }
-        */
     }
 
     public void onResponse(int msgid, Value result, Value error) {
@@ -181,6 +197,17 @@ public class Session {
         for (FutureImpl f : timedout) {
             // FIXME error result
             f.setResult(null, ValueFactory.createRawValue("timedout"));
+        }
+    }
+
+    public void transportError(String msg){
+        synchronized(reqtable) {
+            for(Map.Entry<Integer,FutureImpl> pair : reqtable.entrySet()) {
+                // FIXME
+                FutureImpl f = pair.getValue();
+                f.setResult(null,ValueFactory.createRawValue(msg));
+            }
+            reqtable.clear();
         }
     }
 }

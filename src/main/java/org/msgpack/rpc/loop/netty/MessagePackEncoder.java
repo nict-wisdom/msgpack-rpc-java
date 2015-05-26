@@ -15,17 +15,31 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 //
+/*
+* Copyright (C) 2014-2015 Information Analysis Laboratory, NICT
+*
+* RaSC is free software: you can redistribute it and/or modify it
+* under the terms of the GNU Lesser General Public License as published by
+* the Free Software Foundation, either version 2.1 of the License, or (at
+* your option) any later version.
+*
+* RaSC is distributed in the hope that it will be useful, but
+* WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser
+* General Public License for more details.
+*
+* You should have received a copy of the GNU Lesser General Public License
+* along with this program. If not, see <http://www.gnu.org/licenses/>.
+*/
+
 package org.msgpack.rpc.loop.netty;
 
-import org.jboss.netty.channel.Channel;
-import org.jboss.netty.channel.ChannelHandlerContext;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.buffer.ChannelBufferOutputStream;
-import org.jboss.netty.buffer.ChannelBuffers;
-import org.jboss.netty.handler.codec.oneone.OneToOneEncoder;
+import io.netty.buffer.ByteBuf;
+import io.netty.handler.codec.MessageToByteEncoder;
+
 import org.msgpack.MessagePack;
 
-public class MessagePackEncoder extends OneToOneEncoder {
+public class MessagePackEncoder extends MessageToByteEncoder<Object> {
     private final int estimatedLength;
 
     private MessagePack messagePack;
@@ -39,21 +53,11 @@ public class MessagePackEncoder extends OneToOneEncoder {
         this.messagePack = messagePack;
     }
 
-    @Override
-    protected Object encode(ChannelHandlerContext ctx, Channel channel,
-            Object msg) throws Exception {
-        if (msg instanceof ChannelBuffer) {
-            return msg;
-        }
+	@Override
+	protected void encode(io.netty.channel.ChannelHandlerContext ctx, Object msg, ByteBuf paramByteBuf) throws Exception {
 
-        ChannelBufferOutputStream out = new ChannelBufferOutputStream(
-                ChannelBuffers.dynamicBuffer(estimatedLength, ctx.getChannel()
-                        .getConfig().getBufferFactory()));
+		byte[] buff = messagePack.write(msg);
+		paramByteBuf.writeBytes(buff);
 
-        // MessagePack.pack(out, msg);
-        messagePack.write(out, msg);
-
-        ChannelBuffer result = out.buffer();
-        return result;
-    }
+	}
 }
